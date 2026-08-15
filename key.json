@@ -1,0 +1,13 @@
+{
+  "type": "service_account",
+  "project_id": "namazapp-505523",
+  "private_key_id": "d86ddb530cd8cc3050f5c12bf1713c5b02a70596",
+  "private_key": "-----BEGIN PRIVATE KEY-----\nMIIEvQIBADANBgkqhkiG9w0BAQEFAASCBKcwggSjAgEAAoIBAQC4SmPFYSXHXUmn\nzWs8ge6LZ5OxLLwIn9j8athEgBMw31XREehN6Np/0cqOylBr2AHx2+tsHPNcaFZi\nPBRB8FtWoeLnM9Z4quMtxLXBrLRHKqthjQ4iWuqk+wse8Ugh26Li5ebDwmHOK2yE\nCwaxjugpfOvRUaxlCd03dydjCBZMMQMhJMotFiYNoBH/9p+LOG7QbG9QWc5cH3P3\n+pS9D1S8GAKTDVQcNhaLfStITYm6/4vhNjNx5OYg7cnvC68NhyGQaijnom1lvhIM\nYKvzptvM7AIHYrTTPd9CKftQ5SMMsihfuSPWfj8sAkSW+KJdR517uuwwKzRXs1iU\nwGOlvpl5AgMBAAECggEAD2IpTCiA+XB+dZ8Keq9raNBddiKScyNZvu9RzH0G7RNV\ng+lbY4aCl70czBjUB/6M4gIuN5T+lQoCHPrgI4VzcGq8yLktZ9727gL/u5IlrdOg\nYPkf8wr1D47DpcJ1F5twkEFp5xEmrim2ihqsBT4VP+JVQoCvc/Mz971u6J+8EcG4\n2HxlpZuhqmlzY3rD52QtW0eSOLFFXkGAxAMndyjTBi13pcQoiSz1b9sNQYb3L1Ci\nsDmr45UDaEDIeEZqCAogjvUMXOCovTZlzgdSv4ZvUKyuDZ9UPgoQl0WRzVKUNMV9\nEYOfSwrND8XLmfGJOjlBmqDwCtk8ROdEXI813wtOEQKBgQDd2NlQ0LZK+fmRGjPa\ncYuPqo/YgcJP5rX58ZhvIL0O/0wf3EvFqhrclNApWlWERStMerqtAO53keGomNuf\n8UACoSFgYaZmZiuyDlBiyxubLwQfTsMV7ExlxbpjqX6u4mvI+io6CG/hjOeSwrtu\nb49Qq7cBC628tuxGOQdeHrj46QKBgQDUqWnDEzVhyvRE67hUDAlW5jkseD4xoA3z\nIXPRrh0Lt4tGdAL01gDIIXt/p0MosJ5MW4J8ibvQt5kvOfDBAVnyD1ENFQN323T2\nmFqMfglSH/fMDt34Xo4xKmVmNTsbsxnxK4jlvNq6XdNX6wigRuml4xmbJOX0tKJ9\nHM8PQrpCEQKBgBLGCQ3nu6V4pf/7gavYtADCZE3kHTd5xKiUI1w0Hwun2x9PGzJt\nBLzp8vus41PALrvYHvgI/iUsOTZ1SRCt78bJL/PiD5zWxJfa0j6qBXoKboTfu26d\ngpGSPAW3EDtoecqWMQCcOiuSKv6mcAoWcsBW57O080znBfOjW9ZBL1IRAoGBALiw\nzUZ7JzBgR9aXdYWg0nejCGKDp1gH7jWKhwDCmz0y0YWFeY/TT+h/k7cgt6XeBgzA\nqMmqAPBak3I9esbUep5MCRM4fcOZV7JWTMWZLFUjqFyTSNnMnOc8L8YdUtFSsaQP\nMBx98ORMWiEP4XT5QTAt1G42FHR6cGgCHh3d0M9RAoGARF3mHT3eVpoTzqQPcQ8B\nuyo1/W/cetk4w19h9PTKWK58oj6L0lzKZLRwwjLSrwQ+F3XMJIilYGOgdljohJ8U\nLSvn582kP5618hzh4G2xF5RWmeDc96bCm6fsHltzhBN/1NxRyEzfo217wpjeGN5p\nBxZ5JYf+4trUe8u7o97uMGo=\n-----END PRIVATE KEY-----\n",
+  "client_email": "namaz-bot@namazapp-505523.iam.gserviceaccount.com",
+  "client_id": "100733191457103483852",
+  "auth_uri": "https://accounts.google.com/o/oauth2/auth",
+  "token_uri": "https://oauth2.googleapis.com/token",
+  "auth_provider_x509_cert_url": "https://www.googleapis.com/oauth2/v1/certs",
+  "client_x509_cert_url": "https://www.googleapis.com/robot/v1/metadata/x509/namaz-bot%40namazapp-505523.iam.gserviceaccount.com",
+  "universe_domain": "googleapis.com"
+}
