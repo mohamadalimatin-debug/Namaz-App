@@ -64,6 +64,37 @@ def get_qaza_from_tracker():
     except Exception:
         return {"sobh": 0, "zohr": 0, "asr": 0, "maghrib": maghrib, "isha": isha}
 
+# تابع ثبت و بروزرسانی خلاصه‌ی آمارها مستقیماً در گوگل‌شیت
+def sync_summary_to_google_sheet(sh):
+    try:
+        ws_qaza = sh.get_worksheet(2)
+        base_debt = get_base_debt()
+        q_tracker = get_qaza_from_tracker()
+        
+        data_qaza = ws_qaza.get_all_values()
+        if len(data_qaza) > 6:
+            df_p = pd.DataFrame(data_qaza[7:], columns=data_qaza[6])
+            sobh_p = pd.to_numeric(df_p.iloc[:, 1], errors='coerce').sum()
+            zohr_p = pd.to_numeric(df_p.iloc[:, 2], errors='coerce').sum()
+            asr_p = pd.to_numeric(df_p.iloc[:, 3], errors='coerce').sum()
+            maghrib_p = pd.to_numeric(df_p.iloc[:, 4], errors='coerce').sum()
+            isha_p = pd.to_numeric(df_p.iloc[:, 5], errors='coerce').sum()
+        else:
+            sobh_p = zohr_p = asr_p = maghrib_p = isha_p = 0
+            
+        rem_s = max(0, int((base_debt + q_tracker["sobh"]) - sobh_p))
+        rem_z = max(0, int((base_debt + q_tracker["zohr"]) - zohr_p))
+        rem_a = max(0, int((base_debt + q_tracker["asr"]) - asr_p))
+        rem_m = max(0, int((base_debt + q_tracker["maghrib"]) - maghrib_p))
+        rem_i = max(0, int((base_debt + q_tracker["isha"]) - isha_p))
+        
+        # بروزرسانی خلاصه در ردیف‌های ۳ تا ۵ شیت قضای شخصی
+        ws_qaza.update(values=[["نخوانده‌های ردیاب", q_tracker["sobh"], q_tracker["zohr"], q_tracker["asr"], q_tracker["maghrib"], q_tracker["isha"]]], range_name='A3:F3')
+        ws_qaza.update(values=[["مجموع اداشده‌ها", int(sobh_p), int(zohr_p), int(asr_p), int(maghrib_p), int(isha_p)]], range_name='A4:F4')
+        ws_qaza.update(values=[["صافی باقیمانده کل", rem_s, rem_z, rem_a, rem_m, rem_i]], range_name='A5:F5')
+    except Exception:
+        pass
+
 # 3. طراحی منوی کناری
 st.sidebar.title("📿 منوی اصلی")
 menu = st.sidebar.radio(
@@ -134,7 +165,6 @@ try:
     elif menu == "⚙️ تنظیمات و محاسبه":
         st.subheader("⚙️ ماشین حسابِ دقیقِ بدهیِ نماز")
         
-        # نمایش بدهی پایه فعلی
         current_base = get_base_debt()
         if current_base > 0:
             st.info(f"📌 بدهی پایه تاریخیِ فعلی شما در دیتابیس: **{current_base:,} روز** ثبت شده است.")
@@ -170,7 +200,6 @@ try:
                 else:
                     st.session_state["calc_debt_result"] = total_debt
 
-        # اگر محاسبه‌ای انجام شده، امکان ذخیره به عنوان بدهی پایه فراهم شود
         if "calc_debt_result" in st.session_state:
             total_debt = st.session_state["calc_debt_result"]
             st.success(f"✅ دقیقاً **{total_debt:,} روز** از آن تاریخ گذشته است.")
@@ -182,11 +211,12 @@ try:
             col_s5.metric("🌃 عشا", f"{total_debt:,} روز")
             
             st.markdown("---")
-            if st.button("💾 ذخیره این {total_debt:,} روز به عنوان «بدهی پایه تاریخی» من در دیتابیس"):
+            if st.button(f"💾 ذخیره این {total_debt:,} روز به عنوان «بدهی پایه تاریخی» من در دیتابیس"):
                 try:
                     ws_qaza_base = sh.get_worksheet(2)
-                    ws_qaza_base.update(values=[[str(total_debt)]], range_name='B2')
-                    st.success(f"🎉 با موفقیت ثبت شد! عدد **{total_debt:,} روز** به‌عنوان بدهی پایه شما ذخیره گردید و به بخش «قضای شخصی» منتقل شد.")
+                    ws_qaza_base.update(values=[["بدهی پایه تاریخی", str(total_debt), str(total_debt), str(total_debt), str(total_debt), str(total_debt)]], range_name='A2:F2')
+                    sync_summary_to_google_sheet(sh)
+                    st.success(f"🎉 با موفقیت ثبت شد! عدد **{total_debt:,} روز** به‌عنوان بدهی پایه شما ذخیره و در گوگل شیت به‌روزرسانی شد.")
                     st.rerun()
                 except Exception as e:
                     st.error(f"❌ خطای ذخیره‌سازی: {e}")
@@ -233,6 +263,8 @@ try:
                             ws_daily.update(values=[[tarikh.strip()]], range_name=f'A{target_row}')
                             ws_daily.update(values=[[sobh, zohr, asr, maghrib, isha]], range_name=f'C{target_row}:G{target_row}')
                             st.success(f"✅ اطلاعات تاریخ **{tarikh}** با موفقیت در دیتابیس ابری ثبت شد!")
+                        
+                        sync_summary_to_google_sheet(sh)
                     except Exception as e: 
                         st.error(f"❌ خطای اتصال به گوگل: {e}")
 
@@ -248,6 +280,7 @@ try:
                         for r_idx in sorted(rows_to_delete, reverse=True):
                             ws_daily.delete_rows(r_idx)
                         st.success(f"✅ تمام ثبت‌های مربوط به تاریخ **{date_to_delete}** با موفقیت حذف شدند!")
+                        sync_summary_to_google_sheet(sh)
                         st.rerun()
                     except Exception as e:
                         st.error(f"❌ خطا در حذف: {e}")
@@ -286,7 +319,7 @@ try:
         total_rem = sobh_rem + zohr_rem + asr_rem + maghrib_rem + isha_rem
         
         if total_rem > 0:
-            st.warning(f"🚨 **خلاصه صافی بدهی‌های مانده (پایه تاریخی + ردیاب روزانه - کسرشده با اداشده‌ها | مجموع کل باقیمانده: {total_rem:,} وعده):**")
+            st.warning(f"🚨 **خلاصه بدهی‌های باقیمانده (نمازهای «نخوانده» کسرشده با قضاهای اداشده - صافی مانده: {total_rem:,} وعده):**")
             col_q1, col_q2, col_q3, col_q4, col_q5 = st.columns(5)
             col_q1.metric("🌅 صبح", f"{sobh_rem:,} وعده", delta=f"-{int(sobh_p):,} اداشده" if sobh_p > 0 else None)
             col_q2.metric("☀️ ظهر", f"{zohr_rem:,} وعده", delta=f"-{int(zohr_p):,} اداشده" if zohr_p > 0 else None)
@@ -336,6 +369,8 @@ try:
                             ws_qaza.update(values=[[tarikh.strip()]], range_name=f'A{target_row}')
                             ws_qaza.update(values=[[sobh, zohr, asr, maghrib, isha]], range_name=f'B{target_row}:F{target_row}')
                             st.success("✅ دست مریزاد! آمار قضای شما با موفقیت در اینترنت ذخیره شد.")
+                            
+                        sync_summary_to_google_sheet(sh)
                     except Exception as e: 
                         st.error(f"❌ خطای اتصال به گوگل: {e}")
 
@@ -352,6 +387,7 @@ try:
                         for r_idx in sorted(rows_to_delete, reverse=True):
                             ws_qaza.delete_rows(r_idx)
                         st.success(f"✅ تمام ثبت‌های مربوط به تاریخ **{qaza_date_to_delete}** از قضای شخصی حذف شدند!")
+                        sync_summary_to_google_sheet(sh)
                         st.rerun()
                     except Exception as e:
                         st.error(f"❌ خطا در حذف: {e}")
@@ -371,12 +407,37 @@ try:
     elif menu == "🤝 استیجاری":
         st.subheader("🤝 ثبت و مدیریت نمازهای استیجاری")
         
+        ws_estijari = sh.get_worksheet(3)
+        
+        # ۱. کادر افزودن شخص / قرارداد جدید
+        with st.expander("➕ افزودن نام شخص / قرارداد جدید"):
+            with st.form("add_person_form", clear_on_submit=True):
+                new_person = st.text_input("نام شخص / مرحوم جدید (مثال: مرحوم علی علوی)")
+                btn_add_person = st.form_submit_button("➕ افزودن به لیست")
+                
+                if btn_add_person:
+                    if new_person.strip() == "":
+                        st.error("❌ لطفاً نام شخص را وارد کنید.")
+                    else:
+                        raw_col_a = ws_estijari.col_values(1)[:30]
+                        existing_names = [n.strip() for n in raw_col_a if n.strip() != ""]
+                        
+                        if new_person.strip() in existing_names:
+                            st.warning("⚠️ این نام قبلاً در لیست وجود دارد.")
+                        else:
+                            target_r = len(existing_names) + 1
+                            if target_r > 30: target_r = 30
+                            ws_estijari.update(values=[[new_person.strip()]], range_name=f'A{target_r}')
+                            st.success(f"✅ نام **{new_person.strip()}** با موفقیت به لیست استیجاری اضافه شد!")
+                            st.rerun()
+
+        # ۲. خواندن لیست اسامی برای فرم ثبت
         df_estijari = load_data_from_google(3)
         raw_names = df_estijari.iloc[0:30, 0].tolist()
-        names_list = [name for name in raw_names if str(name).strip() != '']
+        names_list = [str(name).strip() for name in raw_names if str(name).strip() != '' and str(name).strip() != 'None']
         
         if len(names_list) == 0:
-            st.warning("⚠️ نام شخصی یافت نشد. لطفاً در گوگل شیت خود، در داشبورد بالا یک نام اضافه کنید.")
+            st.info("💡 هنوز هیچ نامی در لیست استیجاری ثبت نشده است. لطفاً از کادر بالا (افزودن نام شخص جدید) اولین نام را اضافه کنید.")
         else:
             with st.form("estijari_form", clear_on_submit=True):
                 col1, col2 = st.columns(2)
@@ -393,21 +454,41 @@ try:
                 submitted = st.form_submit_button("☁️ ثبت برای این شخص در گوگل")
                 
                 if submitted:
-                    if tarikh == "": st.error("❌ لطفاً تاریخ را وارد کنید.")
-                    elif (sobh + zohr + asr + maghrib + isha) == 0: st.warning("⚠️ حداقل یک نماز را وارد کنید.")
+                    if tarikh.strip() == "": 
+                        st.error("❌ لطفاً تاریخ را وارد کنید.")
+                    elif (sobh + zohr + asr + maghrib + isha) == 0: 
+                        st.warning("⚠️ حداقل یک نماز را وارد کنید.")
                     else:
                         try:
-                            ws = sh.get_worksheet(3)
-                            col_a = ws.col_values(1)
-                            empty_row = max(36, len(col_a) + 1)
-                            ws.update(values=[[tarikh]], range_name=f'A{empty_row}')
-                            ws.update(values=[[shakhs, sobh, zohr, asr, maghrib, isha]], range_name=f'C{empty_row}:H{empty_row}')
-                            st.success(f"✅ عالی! نمازها برای {shakhs} مستقیماً در گوگل شیت ذخیره شد.")
-                        except Exception as e: st.error(f"❌ خطای اتصال به گوگل: {e}")
+                            col_a_est = ws_estijari.col_values(1)
+                            empty_row = max(36, len(col_a_est) + 1)
+                            ws_estijari.update(values=[[tarikh.strip()]], range_name=f'A{empty_row}')
+                            ws_estijari.update(values=[[shakhs, sobh, zohr, asr, maghrib, isha]], range_name=f'C{empty_row}:H{empty_row}')
+                            st.success(f"✅ عالی! نمازها برای **{shakhs}** مستقیماً در دیتابیس ذخیره شد.")
+                        except Exception as e: 
+                            st.error(f"❌ خطای اتصال به گوگل: {e}")
+        
+        # ۳. حذف یا ویرایش یک رکورد از تاریخچه استیجاری
+        with st.expander("🗑️ حذف یا ویرایش یک ثبت از تاریخچه استیجاری (مدیریت اشتباهات)"):
+            col_a_est = ws_estijari.col_values(1)
+            existing_est_dates = list(set([d for i, d in enumerate(col_a_est) if i >= 35 and d.strip() != ""]))
+            
+            if existing_est_dates:
+                est_date_to_delete = st.selectbox("تاریخ مورد نظر برای حذف را انتخاب کنید:", sorted(existing_est_dates, reverse=True), key="del_est_select")
+                if st.button("❌ حذف کامل این تاریخ از استیجاری", key="del_est_btn"):
+                    try:
+                        rows_to_delete = [i + 1 for i, val in enumerate(col_a_est) if val == est_date_to_delete and i >= 35]
+                        for r_idx in sorted(rows_to_delete, reverse=True):
+                            ws_estijari.delete_rows(r_idx)
+                        st.success(f"✅ تمام ثبت‌های مربوط به تاریخ **{est_date_to_delete}** از استیجاری حذف شدند!")
+                        st.rerun()
+                    except Exception as e:
+                        st.error(f"❌ خطا در حذف: {e}")
+            else:
+                st.info("هنوز هیچ تاریخی در بخش استیجاری ثبت نشده است.")
         
         st.markdown("---")
         st.markdown("### 📊 تاریخچه ثبت‌شده‌ها (استیجاری)")
-        ws_estijari = sh.get_worksheet(3)
         estijari_data = ws_estijari.get_all_values()
         
         if len(estijari_data) > 34:
