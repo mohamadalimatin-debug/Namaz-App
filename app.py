@@ -34,7 +34,19 @@ def load_data_from_google(sheet_index):
         return pd.DataFrame(data[1:], columns=data[0])
     return pd.DataFrame()
 
-# تابع محاسبه دقیق بدهی‌ها (فقط وضعیت‌های "نخوانده" محاسبه می‌شوند)
+# تابع خواندن بدهی پایه ثبت‌شده از ماشین‌حساب
+def get_base_debt():
+    try:
+        sh = get_google_connection()
+        ws = sh.get_worksheet(2)
+        val = ws.acell('B2').value
+        if val and str(val).strip().isdigit():
+            return int(str(val).strip())
+        return 0
+    except Exception:
+        return 0
+
+# تابع محاسبه دقیق بدهی‌ها از ردیاب روزانه (فقط "نخوانده")
 def get_qaza_from_tracker():
     try:
         df_daily = load_data_from_google(1)
@@ -84,9 +96,10 @@ try:
             total_performed = int(sobh_performed + zohr_performed + asr_performed + maghrib_performed + isha_performed)
             dor_kamel = min(sobh_performed, zohr_performed, asr_performed, maghrib_performed, isha_performed)
             
-            # آمار نمازهای نخوانده در ردیاب روزانه
+            # آمار بدهی پایه و ردیاب روزانه
+            base_debt_days = get_base_debt()
             q_tracker = get_qaza_from_tracker()
-            total_unprayed = sum(q_tracker.values())
+            total_unprayed = (base_debt_days * 5) + sum(q_tracker.values())
             
             # بدهی صافی مانده
             net_debt = max(0, total_unprayed - total_performed)
@@ -94,13 +107,24 @@ try:
             col1, col2, col3 = st.columns(3)
             col1.metric(label="🏆 شبانه‌روزهای کامل اداشده (دور کامل)", value=f"{int(dor_kamel)} روز")
             col2.metric(label="📊 مجموع نمازهای قضای خوانده شده", value=f"{total_performed} وعده")
-            col3.metric(label="🚨 صافی بدهی باقیمانده (از ردیاب)", value=f"{net_debt} وعده")
+            col3.metric(label="🚨 صافی کل بدهی باقیمانده", value=f"{net_debt:,} وعده")
             
-            st.markdown("### 📈 نمودار وضعیت نمازهای اداشده و نخوانده")
+            # نوار پیشرفت ادا
+            if total_unprayed > 0:
+                progress_pct = min(100.0, (total_performed / total_unprayed) * 100)
+                st.progress(progress_pct / 100, text=f"📈 درصد پیشرفت ادای کل بدهی‌ها: {progress_pct:.2f}%")
+            
+            st.markdown("### 📈 نمودار وضعیت نمازهای اداشده در برابر بدهی")
             chart_data = pd.DataFrame({
                 "وعده نماز": ["صبح", "ظهر", "عصر", "مغرب", "عشا"],
                 "قضای خوانده شده": [sobh_performed, zohr_performed, asr_performed, maghrib_performed, isha_performed],
-                "نخوانده (بدهی جدید)": [q_tracker["sobh"], q_tracker["zohr"], q_tracker["asr"], q_tracker["maghrib"], q_tracker["isha"]]
+                "کل بدهی (پایه + ردیاب)": [
+                    base_debt_days + q_tracker["sobh"],
+                    base_debt_days + q_tracker["zohr"],
+                    base_debt_days + q_tracker["asr"],
+                    base_debt_days + q_tracker["maghrib"],
+                    base_debt_days + q_tracker["isha"]
+                ]
             })
             st.bar_chart(chart_data.set_index("وعده نماز"))
             
@@ -109,6 +133,12 @@ try:
 
     elif menu == "⚙️ تنظیمات و محاسبه":
         st.subheader("⚙️ ماشین حسابِ دقیقِ بدهیِ نماز")
+        
+        # نمایش بدهی پایه فعلی
+        current_base = get_base_debt()
+        if current_base > 0:
+            st.info(f"📌 بدهی پایه تاریخیِ فعلی شما در دیتابیس: **{current_base:,} روز** ثبت شده است.")
+            
         with st.form("calc_form"):
             st.markdown("#### 📅 اطلاعات تاریخ")
             col1, col2 = st.columns(2)
@@ -138,13 +168,28 @@ try:
                 if total_debt < 0:
                     st.error("❌ تاریخ امروز نمی‌تواند قبل از تاریخ شروع باشد!")
                 else:
-                    st.success(f"✅ دقیقاً **{total_debt:,} روز** از آن تاریخ گذشته است.")
-                    col_s1, col_s2, col_s3, col_s4, col_s5 = st.columns(5)
-                    col_s1.metric("🌅 صبح", f"{total_debt:,} روز")
-                    col_s2.metric("☀️ ظهر", f"{total_debt:,} روز")
-                    col_s3.metric("🌤 عصر", f"{total_debt:,} روز")
-                    col_s4.metric("🌇 مغرب", f"{total_debt:,} روز")
-                    col_s5.metric("🌃 عشا", f"{total_debt:,} روز")
+                    st.session_state["calc_debt_result"] = total_debt
+
+        # اگر محاسبه‌ای انجام شده، امکان ذخیره به عنوان بدهی پایه فراهم شود
+        if "calc_debt_result" in st.session_state:
+            total_debt = st.session_state["calc_debt_result"]
+            st.success(f"✅ دقیقاً **{total_debt:,} روز** از آن تاریخ گذشته است.")
+            col_s1, col_s2, col_s3, col_s4, col_s5 = st.columns(5)
+            col_s1.metric("🌅 صبح", f"{total_debt:,} روز")
+            col_s2.metric("☀️ ظهر", f"{total_debt:,} روز")
+            col_s3.metric("🌤 عصر", f"{total_debt:,} روز")
+            col_s4.metric("🌇 مغرب", f"{total_debt:,} روز")
+            col_s5.metric("🌃 عشا", f"{total_debt:,} روز")
+            
+            st.markdown("---")
+            if st.button("💾 ذخیره این {total_debt:,} روز به عنوان «بدهی پایه تاریخی» من در دیتابیس"):
+                try:
+                    ws_qaza_base = sh.get_worksheet(2)
+                    ws_qaza_base.update(values=[[str(total_debt)]], range_name='B2')
+                    st.success(f"🎉 با موفقیت ثبت شد! عدد **{total_debt:,} روز** به‌عنوان بدهی پایه شما ذخیره گردید و به بخش «قضای شخصی» منتقل شد.")
+                    st.rerun()
+                except Exception as e:
+                    st.error(f"❌ خطای ذخیره‌سازی: {e}")
 
     elif menu == "📅 ردیاب روزانه":
         st.subheader("📅 ثبت و ویرایش وضعیت ردیاب روزانه")
@@ -218,37 +263,40 @@ try:
         ws_qaza = sh.get_worksheet(2)
         df_personal = load_data_from_google(2)
         
-        # محاسبه مجموع خوانده‌شده‌ها
+        # ۱. بدهی پایه تاریخی از ماشین حساب
+        base_debt_days = get_base_debt()
+        
+        # ۲. مجموع خوانده‌شده‌ها در قضای شخصی
         sobh_p = pd.to_numeric(df_personal.iloc[6:, 1], errors='coerce').sum()
         zohr_p = pd.to_numeric(df_personal.iloc[6:, 2], errors='coerce').sum()
         asr_p = pd.to_numeric(df_personal.iloc[6:, 3], errors='coerce').sum()
         maghrib_p = pd.to_numeric(df_personal.iloc[6:, 4], errors='coerce').sum()
         isha_p = pd.to_numeric(df_personal.iloc[6:, 5], errors='coerce').sum()
         
-        # محاسبه نخوانده‌های ردیاب
+        # ۳. نخوانده‌های جدید ردیاب روزانه
         q_tracker = get_qaza_from_tracker()
         
-        # محاسبه بدهی‌های صافی (نخوانده‌ها منفی خوانده‌شده‌ها)
-        sobh_rem = max(0, int(q_tracker["sobh"] - sobh_p))
-        zohr_rem = max(0, int(q_tracker["zohr"] - zohr_p))
-        asr_rem = max(0, int(q_tracker["asr"] - asr_p))
-        maghrib_rem = max(0, int(q_tracker["maghrib"] - maghrib_p))
-        isha_rem = max(0, int(q_tracker["isha"] - isha_p))
+        # ۴. کل بدهی باقیمانده (پایه + ردیاب - خوانده‌شده)
+        sobh_rem = max(0, int((base_debt_days + q_tracker["sobh"]) - sobh_p))
+        zohr_rem = max(0, int((base_debt_days + q_tracker["zohr"]) - zohr_p))
+        asr_rem = max(0, int((base_debt_days + q_tracker["asr"]) - asr_p))
+        maghrib_rem = max(0, int((base_debt_days + q_tracker["maghrib"]) - maghrib_p))
+        isha_rem = max(0, int((base_debt_days + q_tracker["isha"]) - isha_p))
         
         total_rem = sobh_rem + zohr_rem + asr_rem + maghrib_rem + isha_rem
         
-        if total_rem > 0 or sum(q_tracker.values()) > 0:
-            st.warning(f"🚨 **خلاصه بدهی‌های باقیمانده (نمازهای «نخوانده» کسرشده با قضاهای اداشده - صافی مانده: {total_rem} وعده):**")
+        if total_rem > 0:
+            st.warning(f"🚨 **خلاصه صافی بدهی‌های مانده (پایه تاریخی + ردیاب روزانه - کسرشده با اداشده‌ها | مجموع کل باقیمانده: {total_rem:,} وعده):**")
             col_q1, col_q2, col_q3, col_q4, col_q5 = st.columns(5)
-            col_q1.metric("🌅 صبح", f"{sobh_rem} وعده", delta=f"-{int(sobh_p)} اداشده" if sobh_p > 0 else None)
-            col_q2.metric("☀️ ظهر", f"{zohr_rem} وعده", delta=f"-{int(zohr_p)} اداشده" if zohr_p > 0 else None)
-            col_q3.metric("🌤 عصر", f"{asr_rem} وعده", delta=f"-{int(asr_p)} اداشده" if asr_p > 0 else None)
-            col_q4.metric("🌇 مغرب", f"{maghrib_rem} وعده", delta=f"-{int(maghrib_p)} اداشده" if maghrib_p > 0 else None)
-            col_q5.metric("🌃 عشا", f"{isha_rem} وعده", delta=f"-{int(isha_p)} اداشده" if isha_p > 0 else None)
-            st.caption("💡 هر زمان این نمازهای نخوانده را بجا آوردید، فرم زیر را پر کنید تا از آمار بدهی شما کسر/محاسبه شود.")
+            col_q1.metric("🌅 صبح", f"{sobh_rem:,} وعده", delta=f"-{int(sobh_p):,} اداشده" if sobh_p > 0 else None)
+            col_q2.metric("☀️ ظهر", f"{zohr_rem:,} وعده", delta=f"-{int(zohr_p):,} اداشده" if zohr_p > 0 else None)
+            col_q3.metric("🌤 عصر", f"{asr_rem:,} وعده", delta=f"-{int(asr_p):,} اداشده" if asr_p > 0 else None)
+            col_q4.metric("🌇 مغرب", f"{maghrib_rem:,} وعده", delta=f"-{int(maghrib_p):,} اداشده" if maghrib_p > 0 else None)
+            col_q5.metric("🌃 عشا", f"{isha_rem:,} وعده", delta=f"-{int(isha_p):,} اداشده" if isha_p > 0 else None)
+            st.caption("💡 هر زمان این نمازهای قضا را بجا آوردید، فرم زیر را پر کنید تا آمار اداشده‌های شما ثبت شده و از بدهی کسر گردد.")
             st.markdown("---")
-        elif sum(q_tracker.values()) == 0:
-            st.success("🎉 ماشاءالله! هیچ نماز «نخوانده‌ای» در ردیاب روزانه شما ثبت نشده است.")
+        else:
+            st.success("🎉 ماشاءالله! هیچ بدهی نماز قضایی برای شما ثبت نشده یا تمام بدهی‌ها ادا شده است.")
             st.markdown("---")
 
         with st.form("qaza_form", clear_on_submit=True):
