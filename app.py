@@ -1,16 +1,30 @@
 import streamlit as st
 import pandas as pd
 import gspread
+from google.oauth2.service_account import Credentials
 
 # 1. تنظیمات اولیه صفحه
 st.set_page_config(page_title="نرم‌افزار مدیریت نماز", page_icon="🕌", layout="wide")
 
-# 2. اتصال هوشمند به سرورهای گوگل
+# 2. اتصال هوشمند به سرورهای گوگل از طریق Secrets
 @st.cache_resource
 def get_google_connection():
-    # خواندن فایل کارت شناسایی ربات
-    gc = gspread.service_account(filename='key.json')
-    # کد شناسایی دیتابیس شما در گوگل شیت
+    # خواندن اطلاعات از Streamlit Secrets
+    info = dict(st.secrets["gcp_service_account"])
+    
+    # اصلاح خودکار فرمت کلید برای جلوگیری از خطای JWT
+    pk = str(info["private_key"])
+    if "\\n" in pk:
+        pk = pk.replace("\\n", "\n")
+    info["private_key"] = pk
+
+    scopes = [
+        "https://www.googleapis.com/auth/spreadsheets",
+        "https://www.googleapis.com/auth/drive"
+    ]
+    
+    creds = Credentials.from_service_account_info(info, scopes=scopes)
+    gc = gspread.authorize(creds)
     sh = gc.open_by_key('1pq6IE2MIdLh6uXRaYGEsAKYxekQHlStPNn7Liu4kKL4')
     return sh
 
@@ -205,7 +219,7 @@ try:
                 
                 if submitted:
                     if tarikh == "": st.error("❌ لطفاً تاریخ را وارد کنید.")
-                    elif (sobh + zohr + asr + maghrib + isha) == 0: st.warning("⚠️ حداقل یک نماز را وارد کنید.")
+                    elif (sobh + zorbit + asr + maghrib + isha) == 0: st.warning("⚠️ حداقل یک نماز را وارد کنید.")
                     else:
                         try:
                             ws = sh.get_worksheet(3)
@@ -225,7 +239,7 @@ try:
             # استخراج دیتا از ردیف 35 به بعد
             df_updated = pd.DataFrame(estijari_data[35:], columns=estijari_data[34])
             
-            # حذف کردن ستون‌هایی که نام (تیتر) ندارند! (راه حل ارور صورتی)
+            # حذف کردن ستون‌هایی که نام (تیتر) ندارند!
             df_updated = df_updated.loc[:, df_updated.columns != '']
             
             st.dataframe(df_updated, use_container_width=True)
@@ -233,5 +247,4 @@ try:
             st.info("هنوز هیچ نمازی در دفترچه پایین ثبت نشده است.")
 
 except Exception as e:
-    st.error("❌ ارتباط با سرور گوگل برقرار نشد! خطای زیر را بررسی کنید:")
-    st.write(e)
+    st.error(f"❌ ارتباط با سرور گوگل برقرار نشد! خطای زیر را بررسی کنید:\n\n{e}")
