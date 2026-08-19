@@ -34,6 +34,25 @@ def load_data_from_google(sheet_index):
         return pd.DataFrame(data[1:], columns=data[0])
     return pd.DataFrame()
 
+# تابع محاسبه دقیق بدهی‌ها (فقط وضعیت‌های "نخوانده" محاسبه می‌شوند)
+def get_qaza_from_tracker():
+    try:
+        df_daily = load_data_from_google(1)
+        if df_daily.empty or len(df_daily.columns) < 7:
+            return {"sobh": 0, "zohr": 0, "asr": 0, "maghrib": 0, "isha": 0}
+        
+        # فقط نمازهایی که کلاً نخوانده مانده‌اند بدهی محسوب می‌شوند
+        qaza_statuses = ["نخوانده"]
+        sobh = (df_daily.iloc[:, 2].astype(str).isin(qaza_statuses)).sum()
+        zohr = (df_daily.iloc[:, 3].astype(str).isin(qaza_statuses)).sum()
+        asr = (df_daily.iloc[:, 4].astype(str).isin(qaza_statuses)).sum()
+        maghrib = (df_daily.iloc[:, 5].astype(str).isin(qaza_statuses)).sum()
+        isha = (df_daily.iloc[:, 6].astype(str).isin(qaza_statuses)).sum()
+        
+        return {"sobh": sobh, "zohr": zohr, "asr": asr, "maghrib": maghrib, "isha": isha}
+    except Exception:
+        return {"sobh": 0, "zohr": 0, "asr": 0, "maghrib": maghrib, "isha": isha}
+
 # 3. طراحی منوی کناری
 st.sidebar.title("📿 منوی اصلی")
 menu = st.sidebar.radio(
@@ -55,27 +74,33 @@ try:
         st.markdown("---")
         
         try:
-            df_personal = load_data_from_google(2) # شیت سوم: قضای شخصی
+            df_personal = load_data_from_google(2) # شیت قضای شخصی
             
-            sobh_total = pd.to_numeric(df_personal.iloc[6:, 1], errors='coerce').sum()
-            zohr_total = pd.to_numeric(df_personal.iloc[6:, 2], errors='coerce').sum()
-            asr_total = pd.to_numeric(df_personal.iloc[6:, 3], errors='coerce').sum()
-            maghrib_total = pd.to_numeric(df_personal.iloc[6:, 4], errors='coerce').sum()
-            isha_total = pd.to_numeric(df_personal.iloc[6:, 5], errors='coerce').sum()
+            sobh_performed = pd.to_numeric(df_personal.iloc[6:, 1], errors='coerce').sum()
+            zohr_performed = pd.to_numeric(df_personal.iloc[6:, 2], errors='coerce').sum()
+            asr_performed = pd.to_numeric(df_personal.iloc[6:, 3], errors='coerce').sum()
+            maghrib_performed = pd.to_numeric(df_personal.iloc[6:, 4], errors='coerce').sum()
+            isha_performed = pd.to_numeric(df_personal.iloc[6:, 5], errors='coerce').sum()
             
-            dor_kamel = min(sobh_total, zohr_total, asr_total, maghrib_total, isha_total)
+            total_performed = int(sobh_performed + zohr_performed + asr_performed + maghrib_performed + isha_performed)
+            dor_kamel = min(sobh_performed, zohr_performed, asr_performed, maghrib_performed, isha_performed)
+            
+            # آمار نمازهای نخوانده در ردیاب روزانه
+            q_tracker = get_qaza_from_tracker()
+            total_unprayed = sum(q_tracker.values())
             
             col1, col2, col3 = st.columns(3)
-            col1.metric(label="🏆 شبانه‌روزهای کامل (دور کامل)", value=f"{int(dor_kamel)} روز")
-            col2.metric(label="📊 مجموع نمازهای خوانده شده", value=f"{int(sobh_total+zohr_total+asr_total+maghrib_total+isha_total)} وعده")
-            col3.metric(label="🌟 بیشترین پیشرفت", value=f"{int(max([sobh_total, zohr_total, asr_total, maghrib_total, isha_total]))}")
+            col1.metric(label="🏆 شبانه‌روزهای کامل اداشده (دور کامل)", value=f"{int(dor_kamel)} روز")
+            col2.metric(label="📊 مجموع نمازهای قضای خوانده شده", value=f"{total_performed} وعده")
+            col3.metric(label="🚨 نمازهای نخوانده (بدهی از ردیاب)", value=f"{total_unprayed} وعده")
             
-            st.markdown("### 📈 نمودار وضعیت نمازهای قضای خوانده شده")
+            st.markdown("### 📈 نمودار وضعیت نمازهای اداشده و نخوانده")
             chart_data = pd.DataFrame({
                 "وعده نماز": ["صبح", "ظهر", "عصر", "مغرب", "عشا"],
-                "تعداد خوانده شده": [sobh_total, zohr_total, asr_total, maghrib_total, isha_total]
+                "قضای خوانده شده": [sobh_performed, zohr_performed, asr_performed, maghrib_performed, isha_performed],
+                "نخوانده (بدهی جدید)": [q_tracker["sobh"], q_tracker["zohr"], q_tracker["asr"], q_tracker["maghrib"], q_tracker["isha"]]
             })
-            st.bar_chart(chart_data.set_index("وعده نماز"), color="#4CAF50")
+            st.bar_chart(chart_data.set_index("وعده نماز"))
             
         except Exception as e:
             st.warning("⚠️ برای نمایش نمودار، لطفاً ابتدا چند نماز قضا در دیتابیس ثبت کنید.")
@@ -112,15 +137,12 @@ try:
                     st.error("❌ تاریخ امروز نمی‌تواند قبل از تاریخ شروع باشد!")
                 else:
                     st.success(f"✅ دقیقاً **{total_debt:,} روز** از آن تاریخ گذشته است.")
-                    st.markdown(f"""
-                    <div style='display:flex; justify-content:space-between; background-color:#1E1E1E; padding:20px; border-radius:10px; text-align:center;'>
-                        <div><h3 style='color:#4CAF50;'>🌅 صبح</h3><p style='font-size:20px;'>{total_debt:,}</p></div>
-                        <div><h3 style='color:#FFC107;'>☀️ ظهر</h3><p style='font-size:20px;'>{total_debt:,}</p></div>
-                        <div><h3 style='color:#2196F3;'>🌤 عصر</h3><p style='font-size:20px;'>{total_debt:,}</p></div>
-                        <div><h3 style='color:#FF5722;'>🌇 مغرب</h3><p style='font-size:20px;'>{total_debt:,}</p></div>
-                        <div><h3 style='color:#9C27B0;'>🌃 عشا</h3><p style='font-size:20px;'>{total_debt:,}</p></div>
-                    </div>
-                    """, unsafe_allow_html=True)
+                    col_s1, col_s2, col_s3, col_s4, col_s5 = st.columns(5)
+                    col_s1.metric("🌅 صبح", f"{total_debt:,} روز")
+                    col_s2.metric("☀️ ظهر", f"{total_debt:,} روز")
+                    col_s3.metric("🌤 عصر", f"{total_debt:,} روز")
+                    col_s4.metric("🌇 مغرب", f"{total_debt:,} روز")
+                    col_s5.metric("🌃 عشا", f"{total_debt:,} روز")
 
     elif menu == "📅 ردیاب روزانه":
         st.subheader("📅 ثبت و ویرایش وضعیت ردیاب روزانه")
@@ -146,7 +168,6 @@ try:
                 else:
                     try:
                         col_a_vals = ws_daily.col_values(1)
-                        # پیدا کردن تمام شماره ردیف‌هایی که این تاریخ را دارند
                         matching_rows = [i + 1 for i, val in enumerate(col_a_vals) if val == tarikh.strip()]
                         
                         if matching_rows:
@@ -154,7 +175,6 @@ try:
                             ws_daily.update(values=[[tarikh.strip()]], range_name=f'A{target_row}')
                             ws_daily.update(values=[[sobh, zohr, asr, maghrib, isha]], range_name=f'C{target_row}:G{target_row}')
                             
-                            # پاک کردن ردیف‌های تکراری اضافه
                             if len(matching_rows) > 1:
                                 for dup_row in sorted(matching_rows[1:], reverse=True):
                                     ws_daily.delete_rows(dup_row)
@@ -169,10 +189,8 @@ try:
                     except Exception as e: 
                         st.error(f"❌ خطای اتصال به گوگل: {e}")
 
-        # بخش جدید: کادر حذف دستی ردیف‌های دلخواه یا تکراری
         with st.expander("🗑️ حذف یک تاریخ از دیتابیس (مدیریت تکراری‌ها یا اشتباهات)"):
             col_a_vals = ws_daily.col_values(1)
-            # استخراج لیست تاریخ‌های موجود
             existing_dates = list(set([d for d in col_a_vals[1:] if d.strip() != ""]))
             
             if existing_dates:
@@ -193,7 +211,23 @@ try:
         st.dataframe(load_data_from_google(1), use_container_width=True)
 
     elif menu == "👤 قضای شخصی":
-        st.subheader("👤 ثبت نمازهای قضای خوانده شده")
+        st.subheader("👤 ثبت و مدیریت نمازهای قضای خوانده شده")
+        
+        # محاسبه خودکار فقط نمازهای نخوانده مانده از ردیاب روزانه
+        q_tracker = get_qaza_from_tracker()
+        total_qaza_tracker = sum(q_tracker.values())
+        
+        if total_qaza_tracker > 0:
+            st.warning(f"🚨 **خلاصه بدهی‌های جدید (نمازهای «نخوانده» در ردیاب روزانه - مجموع: {total_qaza_tracker} وعده):**")
+            col_q1, col_q2, col_q3, col_q4, col_q5 = st.columns(5)
+            col_q1.metric("🌅 صبح", f"{q_tracker['sobh']} وعده")
+            col_q2.metric("☀️ ظهر", f"{q_tracker['zohr']} وعده")
+            col_q3.metric("🌤 عصر", f"{q_tracker['asr']} وعده")
+            col_q4.metric("🌇 مغرب", f"{q_tracker['maghrib']} وعده")
+            col_q5.metric("🌃 عشا", f"{q_tracker['isha']} وعده")
+            st.caption("💡 هر زمان این نمازهای نخوانده را بجا آوردید، فرم زیر را پر کنید تا آمار خوانده‌شده‌های شما ثبت گردد.")
+            st.markdown("---")
+
         with st.form("qaza_form", clear_on_submit=True):
             tarikh = st.text_input("تاریخ خواندن قضا (مثال: 1403/06/15)", placeholder="1403/06/15")
             c_s, c_z, c_a, c_m, c_e = st.columns(5)
