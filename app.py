@@ -34,6 +34,36 @@ def load_data_from_google(sheet_index):
         return pd.DataFrame(data[1:], columns=data[0])
     return pd.DataFrame()
 
+# تابع بررسی ترتیب شرعی و قانون دور کامل
+def validate_qaza_sequence(s_old, z_old, a_old, m_old, i_old, s_add, z_add, a_add, m_add, i_add):
+    s_new = int(s_old + s_add)
+    z_new = int(z_old + z_add)
+    a_new = int(a_old + a_add)
+    m_new = int(m_old + m_add)
+    i_new = int(i_old + i_add)
+    
+    # ۱. بررسی ترتیب داخل یک شبانه‌روز
+    if not (s_new >= z_new):
+        return False, "❌ عدم رعایت ترتیب شرعی: تعداد نمازهای ظهر نمی‌تواند از نمازهای صبح بیشتر باشد! ابتدا باید نماز صبح این شبانه‌روز را کامل کنید."
+    if not (z_new >= a_new):
+        return False, "❌ عدم رعایت ترتیب شرعی: تعداد نمازهای عصر نمی‌تواند از نمازهای ظهر بیشتر باشد! ابتدا باید نماز ظهر را کامل کنید."
+    if not (a_new >= m_new):
+        return False, "❌ عدم رعایت ترتیب شرعی: تعداد نمازهای مغرب نمی‌تواند از نمازهای عصر بیشتر باشد! ابتدا باید نماز عصر را کامل کنید."
+    if not (m_new >= i_new):
+        return False, "❌ عدم رعایت ترتیب شرعی: تعداد نمازهای عشا نمی‌تواند از نمازهای مغرب بیشتر باشد! ابتدا باید نماز مغرب را کامل کنید."
+        
+    # ۲. بررسی قانون دور کامل (عدم اجازه ورود به شبانه‌روز بعد تا زمان تکمیل عشا)
+    if not (s_new <= i_new + 1):
+        missing = []
+        if z_new < s_new - 1: missing.append("ظهر")
+        if a_new < s_new - 1: missing.append("عصر")
+        if m_new < s_new - 1: missing.append("مغرب")
+        if i_new < s_new - 1: missing.append("عشا")
+        missing_str = "، ".join(missing) if missing else "بقیه نمازها"
+        return False, f"❌ عدم امکان ورود به شبانه‌روز بعد: شما هنوز دور کامل شبانه‌روز قبل را با خواندن ({missing_str}) تکمیل نکرده‌اید! تا زمانی که عشا و دور قبل تمام نشود، نمی‌توانید صبحِ روز بعد را شروع کنید."
+        
+    return True, "OK"
+
 # تابع خواندن بدهی پایه ثبت‌شده از ماشین‌حساب
 def get_base_debt():
     try:
@@ -88,7 +118,6 @@ def sync_summary_to_google_sheet(sh):
         rem_m = max(0, int((base_debt + q_tracker["maghrib"]) - maghrib_p))
         rem_i = max(0, int((base_debt + q_tracker["isha"]) - isha_p))
         
-        # بروزرسانی خلاصه در ردیف‌های ۳ تا ۵ شیت قضای شخصی
         ws_qaza.update(values=[["نخوانده‌های ردیاب", q_tracker["sobh"], q_tracker["zohr"], q_tracker["asr"], q_tracker["maghrib"], q_tracker["isha"]]], range_name='A3:F3')
         ws_qaza.update(values=[["مجموع اداشده‌ها", int(sobh_p), int(zohr_p), int(asr_p), int(maghrib_p), int(isha_p)]], range_name='A4:F4')
         ws_qaza.update(values=[["صافی باقیمانده کل", rem_s, rem_z, rem_a, rem_m, rem_i]], range_name='A5:F5')
@@ -127,12 +156,10 @@ try:
             total_performed = int(sobh_performed + zohr_performed + asr_performed + maghrib_performed + isha_performed)
             dor_kamel = min(sobh_performed, zohr_performed, asr_performed, maghrib_performed, isha_performed)
             
-            # آمار بدهی پایه و ردیاب روزانه
             base_debt_days = get_base_debt()
             q_tracker = get_qaza_from_tracker()
             total_unprayed = (base_debt_days * 5) + sum(q_tracker.values())
             
-            # بدهی صافی مانده
             net_debt = max(0, total_unprayed - total_performed)
             
             col1, col2, col3 = st.columns(3)
@@ -140,7 +167,6 @@ try:
             col2.metric(label="📊 مجموع نمازهای قضای خوانده شده", value=f"{total_performed} وعده")
             col3.metric(label="🚨 صافی کل بدهی باقیمانده", value=f"{net_debt:,} وعده")
             
-            # نوار پیشرفت ادا
             if total_unprayed > 0:
                 progress_pct = min(100.0, (total_performed / total_unprayed) * 100)
                 st.progress(progress_pct / 100, text=f"📈 درصد پیشرفت ادای کل بدهی‌ها: {progress_pct:.2f}%")
@@ -292,24 +318,21 @@ try:
 
     elif menu == "👤 قضای شخصی":
         st.subheader("👤 ثبت و مدیریت نمازهای قضای خوانده شده")
+        st.caption("⚖️ **شرط شرعی ترتیب:** شما باید نمازها را به ترتیب دور کامل (صبح 👈 ظهر 👈 عصر 👈 مغرب 👈 عشا) بخوانید و نمی‌توانید وارد شبانه‌روز بعد شوید مگر اینکه دور قبل کامل شده باشد.")
         
         ws_qaza = sh.get_worksheet(2)
         df_personal = load_data_from_google(2)
         
-        # ۱. بدهی پایه تاریخی از ماشین حساب
         base_debt_days = get_base_debt()
         
-        # ۲. مجموع خوانده‌شده‌ها در قضای شخصی
         sobh_p = pd.to_numeric(df_personal.iloc[6:, 1], errors='coerce').sum()
         zohr_p = pd.to_numeric(df_personal.iloc[6:, 2], errors='coerce').sum()
         asr_p = pd.to_numeric(df_personal.iloc[6:, 3], errors='coerce').sum()
         maghrib_p = pd.to_numeric(df_personal.iloc[6:, 4], errors='coerce').sum()
         isha_p = pd.to_numeric(df_personal.iloc[6:, 5], errors='coerce').sum()
         
-        # ۳. نخوانده‌های جدید ردیاب روزانه
         q_tracker = get_qaza_from_tracker()
         
-        # ۴. کل بدهی باقیمانده (پایه + ردیاب - خوانده‌شده)
         sobh_rem = max(0, int((base_debt_days + q_tracker["sobh"]) - sobh_p))
         zohr_rem = max(0, int((base_debt_days + q_tracker["zohr"]) - zohr_p))
         asr_rem = max(0, int((base_debt_days + q_tracker["asr"]) - asr_p))
@@ -319,14 +342,13 @@ try:
         total_rem = sobh_rem + zohr_rem + asr_rem + maghrib_rem + isha_rem
         
         if total_rem > 0:
-            st.warning(f"🚨 **خلاصه بدهی‌های باقیمانده (نمازهای «نخوانده» کسرشده با قضاهای اداشده - صافی مانده: {total_rem:,} وعده):**")
+            st.warning(f"🚨 **خلاصه بدهی‌های باقیمانده (صافی مانده کل: {total_rem:,} وعده):**")
             col_q1, col_q2, col_q3, col_q4, col_q5 = st.columns(5)
             col_q1.metric("🌅 صبح", f"{sobh_rem:,} وعده", delta=f"-{int(sobh_p):,} اداشده" if sobh_p > 0 else None)
             col_q2.metric("☀️ ظهر", f"{zohr_rem:,} وعده", delta=f"-{int(zohr_p):,} اداشده" if zohr_p > 0 else None)
             col_q3.metric("🌤 عصر", f"{asr_rem:,} وعده", delta=f"-{int(asr_p):,} اداشده" if asr_p > 0 else None)
             col_q4.metric("🌇 مغرب", f"{maghrib_rem:,} وعده", delta=f"-{int(maghrib_p):,} اداشده" if maghrib_p > 0 else None)
             col_q5.metric("🌃 عشا", f"{isha_rem:,} وعده", delta=f"-{int(isha_p):,} اداشده" if isha_p > 0 else None)
-            st.caption("💡 هر زمان این نمازهای قضا را بجا آوردید، فرم زیر را پر کنید تا آمار اداشده‌های شما ثبت شده و از بدهی کسر گردد.")
             st.markdown("---")
         else:
             st.success("🎉 ماشاءالله! هیچ بدهی نماز قضایی برای شما ثبت نشده یا تمام بدهی‌ها ادا شده است.")
@@ -334,12 +356,23 @@ try:
 
         with st.form("qaza_form", clear_on_submit=True):
             tarikh = st.text_input("تاریخ خواندن قضا (مثال: 1403/06/15)", placeholder="1403/06/15")
-            c_s, c_z, c_a, c_m, c_e = st.columns(5)
-            with c_s: sobh = st.number_input("🌅 صبح", min_value=0, step=1)
-            with c_z: zohr = st.number_input("☀️ ظهر", min_value=0, step=1)
-            with c_a: asr = st.number_input("🌤 عصر", min_value=0, step=1)
-            with c_m: maghrib = st.number_input("🌇 مغرب", min_value=0, step=1)
-            with c_e: isha = st.number_input("🌃 عشا", min_value=0, step=1)
+            
+            entry_mode = st.radio(
+                "روش ثبت قضا:",
+                ["☀️ ثبت شبانه‌روز کامل (دور کامل)", "🔢 ثبت وعده‌ای (با رعایت ترتیب شرعی)"],
+                horizontal=True
+            )
+            
+            if "ثبت شبانه‌روز کامل" in entry_mode:
+                days_added = st.number_input("تعداد شبانه‌روز کامل (دور کامل) خوانده‌شده:", min_value=1, value=1, step=1)
+                sobh = zohr = asr = maghrib = isha = days_added
+            else:
+                c_s, c_z, c_a, c_m, c_e = st.columns(5)
+                with c_s: sobh = st.number_input("🌅 صبح", min_value=0, step=1)
+                with c_z: zohr = st.number_input("☀️ ظهر", min_value=0, step=1)
+                with c_a: asr = st.number_input("🌤 عصر", min_value=0, step=1)
+                with c_m: maghrib = st.number_input("🌇 مغرب", min_value=0, step=1)
+                with c_e: isha = st.number_input("🌃 عشا", min_value=0, step=1)
                 
             submitted = st.form_submit_button("☁️ ثبت / ویرایش در سرور گوگل")
             
@@ -349,30 +382,37 @@ try:
                 elif (sobh + zohr + asr + maghrib + isha) == 0: 
                     st.warning("⚠️ شما هیچ عددی وارد نکرده‌اید.")
                 else:
-                    try:
-                        col_a_qaza = ws_qaza.col_values(1)
-                        matching_q_rows = [i + 1 for i, val in enumerate(col_a_qaza) if val == tarikh.strip() and i >= 7]
-                        
-                        if matching_q_rows:
-                            target_row = matching_q_rows[0]
-                            ws_qaza.update(values=[[tarikh.strip()]], range_name=f'A{target_row}')
-                            ws_qaza.update(values=[[sobh, zohr, asr, maghrib, isha]], range_name=f'B{target_row}:F{target_row}')
+                    # بررسی شرط شرعی ترتیب و عدم ورود به روز بعد بدون دور کامل
+                    is_valid, err_msg = validate_qaza_sequence(sobh_p, zohr_p, asr_p, maghrib_p, isha_p, sobh, zohr, asr, maghrib, isha)
+                    
+                    if not is_valid:
+                        st.error(err_msg)
+                    else:
+                        try:
+                            col_a_qaza = ws_qaza.col_values(1)
+                            matching_q_rows = [i + 1 for i, val in enumerate(col_a_qaza) if val == tarikh.strip() and i >= 7]
                             
-                            if len(matching_q_rows) > 1:
-                                for dup_row in sorted(matching_q_rows[1:], reverse=True):
-                                    ws_qaza.delete_rows(dup_row)
-                                st.success(f"✏️ اطلاعات ثبت قضای تاریخ **{tarikh}** به‌روزرسانی شد و ردیف‌های تکراری پاک شدند!")
+                            if matching_q_rows:
+                                target_row = matching_q_rows[0]
+                                ws_qaza.update(values=[[tarikh.strip()]], range_name=f'A{target_row}')
+                                ws_qaza.update(values=[[sobh, zohr, asr, maghrib, isha]], range_name=f'B{target_row}:F{target_row}')
+                                
+                                if len(matching_q_rows) > 1:
+                                    for dup_row in sorted(matching_q_rows[1:], reverse=True):
+                                        ws_qaza.delete_rows(dup_row)
+                                    st.success(f"✏️ اطلاعات ثبت قضای تاریخ **{tarikh}** به‌روزرسانی شد و ردیف‌های تکراری پاک شدند!")
+                                else:
+                                    st.success(f"✏️ اطلاعات ثبت قضای تاریخ **{tarikh}** با موفقیت ویرایش شد!")
                             else:
-                                st.success(f"✏️ اطلاعات ثبت قضای تاریخ **{tarikh}** با موفقیت ویرایش شد!")
-                        else:
-                            target_row = max(8, len(col_a_qaza) + 1)
-                            ws_qaza.update(values=[[tarikh.strip()]], range_name=f'A{target_row}')
-                            ws_qaza.update(values=[[sobh, zohr, asr, maghrib, isha]], range_name=f'B{target_row}:F{target_row}')
-                            st.success("✅ دست مریزاد! آمار قضای شما با موفقیت در اینترنت ذخیره شد.")
-                            
-                        sync_summary_to_google_sheet(sh)
-                    except Exception as e: 
-                        st.error(f"❌ خطای اتصال به گوگل: {e}")
+                                target_row = max(8, len(col_a_qaza) + 1)
+                                ws_qaza.update(values=[[tarikh.strip()]], range_name=f'A{target_row}')
+                                ws_qaza.update(values=[[sobh, zohr, asr, maghrib, isha]], range_name=f'B{target_row}:F{target_row}')
+                                st.success("✅ دست مریزاد! آمار قضای شما با موفقیت در اینترنت ذخیره شد.")
+                                
+                            sync_summary_to_google_sheet(sh)
+                            st.rerun()
+                        except Exception as e: 
+                            st.error(f"❌ خطای اتصال به گوگل: {e}")
 
         with st.expander("🗑️ حذف یا ویرایش یک تاریخ از لیست قضای شخصی (مدیریت اشتباهات)"):
             col_a_qaza = ws_qaza.col_values(1)
@@ -409,7 +449,6 @@ try:
         ws_estijari = sh.get_worksheet(3)
         estijari_all = ws_estijari.get_all_values()
         
-        # ۱. کادر افزودن قرارداد جدید با ۱۱ پارامتر کامل
         with st.expander("➕ تعریف قرارداد استیجاری جدید"):
             with st.form("add_contract_form", clear_on_submit=True):
                 col_c1, col_c2 = st.columns(2)
@@ -438,7 +477,6 @@ try:
                             st.success(f"✅ قرارداد مربوط به **{new_name.strip()}** با تعهد **{new_commitment} روز** ثبت شد!")
                             st.rerun()
 
-        # ۲. استخراج لیست قراردادهای فعال
         contracts = []
         for r_idx in range(0, min(30, len(estijari_all))):
             row = estijari_all[r_idx]
@@ -461,7 +499,6 @@ try:
             
             contract_info = next(c for c in contracts if c["name"] == selected_person)
             
-            # محاسبه آمار اداشده از جدول کارکرد استیجاری (از ردیف ۳۵ به بعد)
             sobh_p = zohr_p = asr_p = maghrib_p = isha_p = 0
             if len(estijari_all) > 34:
                 for row in estijari_all[35:]:
@@ -472,7 +509,6 @@ try:
                         maghrib_p += int(row[6].strip()) if row[6].strip().isdigit() else 0
                         isha_p += int(row[7].strip()) if row[7].strip().isdigit() else 0
             
-            # شرط شرعی رعایت ترتیب "دور کامل" (کمترین وعده خوانده‌شده)
             dor_kamel_p = min(sobh_p, zohr_p, asr_p, maghrib_p, isha_p)
             total_commitment = contract_info["commitment"]
             dor_kamel_rem = max(0, total_commitment - dor_kamel_p)
@@ -489,40 +525,60 @@ try:
             st.progress(progress_e / 100, text=f"📈 پیشرفت «دور کامل» قرارداد: {progress_e:.2f}%")
             
             if sobh_p != dor_kamel_p or zohr_p != dor_kamel_p or asr_p != dor_kamel_p or maghrib_p != dor_kamel_p or isha_p != dor_kamel_p:
-                st.caption(f"⚠️ تفکیک وعده‌های ثبت‌شده: صبح: {sobh_p} | ظهر: {zohr_p} | عصر: {asr_p} | مغرب: {maghrib_p} | عشا: {isha_p} 👈 (فقط {dor_kamel_p} شبانه‌روز به‌صورت «دور کامل مرتب» تکمیل شده است).")
+                st.caption(f"⚠️ تفکیک وعده‌ها: صبح: {sobh_p} | ظهر: {zohr_p} | عصر: {asr_p} | مغرب: {maghrib_p} | عشا: {isha_p} 👈 (فقط {dor_kamel_p} شبانه‌روز به‌صورت «دور کامل مرتب» تکمیل شده است).")
             
             st.markdown("---")
             st.markdown("#### ✍️ ثبت کارکرد جدید برای این قرارداد")
-            st.caption("💡 نکته شرعی: نمازهای استیجاری باید به ترتیب دور کامل (صبح 👈 ظهر 👈 عصر 👈 مغرب 👈 عشا) ادا شوند.")
+            st.caption("💡 **شرط شرعی ترتیب:** نمازهای استیجاری باید به ترتیب دور کامل (صبح 👈 ظهر 👈 عصر 👈 مغرب 👈 عشا) خوانده شوند و عبور به شبانه‌روز بعد فقط پس از تکمیل عشا میسر است.")
             
             with st.form("estijari_log_form", clear_on_submit=True):
                 col_f1, col_f2 = st.columns(2)
                 with col_f1: tarikh = st.text_input("تاریخ خواندن (مثال: 1403/06/15)", placeholder="1403/06/15")
                 with col_f2: st.text_input("قرارداد مربوط به:", value=selected_person, disabled=True)
                 
-                c_s, c_z, c_a, c_m, c_e = st.columns(5)
-                with c_s: sobh = st.number_input("🌅 صبح", min_value=0, step=1, key="e_s")
-                with c_z: zohr = st.number_input("☀️ ظهر", min_value=0, step=1, key="e_z")
-                with c_a: asr = st.number_input("🌤 عصر", min_value=0, step=1, key="e_a")
-                with c_m: maghrib = st.number_input("🌇 مغرب", min_value=0, step=1, key="e_m")
-                with c_e: isha = st.number_input("🌃 عشا", min_value=0, step=1, key="e_e")
+                entry_mode_est = st.radio(
+                    "روش ثبت کارکرد استیجاری:",
+                    ["☀️ ثبت شبانه‌روز کامل (دور کامل)", "🔢 ثبت وعده‌ای (با رعایت ترتیب شرعی)"],
+                    horizontal=True
+                )
+                
+                if "ثبت شبانه‌روز کامل" in entry_mode_est:
+                    days_added = st.number_input("تعداد شبانه‌روز کامل (دور کامل) خوانده‌شده:", min_value=1, value=1, step=1, key="e_days")
+                    sobh = zohr = asr = maghrib = isha = days_added
+                else:
+                    c_s, c_z, c_a, c_m, c_e = st.columns(5)
+                    with c_s: sobh = st.number_input("🌅 صبح", min_value=0, step=1, key="e_s")
+                    with c_z: zohr = st.number_input("☀️ ظهر", min_value=0, step=1, key="e_z")
+                    with c_a: asr = st.number_input("🌤 عصر", min_value=0, step=1, key="e_a")
+                    with c_m: maghrib = st.number_input("🌇 مغرب", min_value=0, step=1, key="e_m")
+                    with c_e: isha = st.number_input("🌃 عشا", min_value=0, step=1, key="e_e")
                     
                 submitted_est = st.form_submit_button("☁️ ثبت برای این شخص در گوگل")
                 
                 if submitted_est:
-                    if tarikh.strip() == "": st.error("❌ لطفاً تاریخ را وارد کنید.")
-                    elif (sobh + zohr + asr + maghrib + isha) == 0: st.warning("⚠️ حداقل یک نماز را وارد کنید.")
+                    if tarikh.strip() == "": 
+                        st.error("❌ لطفاً تاریخ را وارد کنید.")
+                    elif (sobh + zohr + asr + maghrib + isha) == 0: 
+                        st.warning("⚠️ حداقل یک نماز را وارد کنید.")
                     else:
-                        try:
-                            col_a_est = ws_estijari.col_values(1)
-                            empty_row = max(36, len(col_a_est) + 1)
-                            ws_estijari.update(values=[[tarikh.strip()]], range_name=f'A{empty_row}')
-                            ws_estijari.update(values=[[selected_person, sobh, zohr, asr, maghrib, isha]], range_name=f'C{empty_row}:H{empty_row}')
-                            st.success(f"✅ کارکرد جدید برای **{selected_person}** با موفقیت در دیتابیس ثبت شد!")
-                            st.rerun()
-                        except Exception as e: st.error(f"❌ خطای اتصال به گوگل: {e}")
+                        is_valid_e, err_msg_e = validate_qaza_sequence(
+                            sobh_p, zohr_p, asr_p, maghrib_p, isha_p,
+                            sobh, zohr, asr, maghrib, isha
+                        )
+                        
+                        if not is_valid_e:
+                            st.error(err_msg_e)
+                        else:
+                            try:
+                                col_a_est = ws_estijari.col_values(1)
+                                empty_row = max(36, len(col_a_est) + 1)
+                                ws_estijari.update(values=[[tarikh.strip()]], range_name=f'A{empty_row}')
+                                ws_estijari.update(values=[[selected_person, sobh, zohr, asr, maghrib, isha]], range_name=f'C{empty_row}:H{empty_row}')
+                                st.success(f"✅ کارکرد جدید برای **{selected_person}** با رعایت ترتیب شرعی ثبت شد!")
+                                st.rerun()
+                            except Exception as e: 
+                                st.error(f"❌ خطای اتصال به گوگل: {e}")
         
-        # ۳. بخش حذف اشتباهات تاریخچه استیجاری
         st.markdown("---")
         with st.expander("🗑️ حذف یا ویرایش یک ثبت از تاریخچه استیجاری (مدیریت اشتباهات)"):
             col_a_est = ws_estijari.col_values(1)
