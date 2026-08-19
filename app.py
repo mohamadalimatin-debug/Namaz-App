@@ -41,7 +41,6 @@ def get_qaza_from_tracker():
         if df_daily.empty or len(df_daily.columns) < 7:
             return {"sobh": 0, "zohr": 0, "asr": 0, "maghrib": 0, "isha": 0}
         
-        # فقط نمازهایی که کلاً نخوانده مانده‌اند بدهی محسوب می‌شوند
         qaza_statuses = ["نخوانده"]
         sobh = (df_daily.iloc[:, 2].astype(str).isin(qaza_statuses)).sum()
         zohr = (df_daily.iloc[:, 3].astype(str).isin(qaza_statuses)).sum()
@@ -89,10 +88,13 @@ try:
             q_tracker = get_qaza_from_tracker()
             total_unprayed = sum(q_tracker.values())
             
+            # بدهی صافی مانده
+            net_debt = max(0, total_unprayed - total_performed)
+            
             col1, col2, col3 = st.columns(3)
             col1.metric(label="🏆 شبانه‌روزهای کامل اداشده (دور کامل)", value=f"{int(dor_kamel)} روز")
             col2.metric(label="📊 مجموع نمازهای قضای خوانده شده", value=f"{total_performed} وعده")
-            col3.metric(label="🚨 نمازهای نخوانده (بدهی از ردیاب)", value=f"{total_unprayed} وعده")
+            col3.metric(label="🚨 صافی بدهی باقیمانده (از ردیاب)", value=f"{net_debt} وعده")
             
             st.markdown("### 📈 نمودار وضعیت نمازهای اداشده و نخوانده")
             chart_data = pd.DataFrame({
@@ -213,19 +215,40 @@ try:
     elif menu == "👤 قضای شخصی":
         st.subheader("👤 ثبت و مدیریت نمازهای قضای خوانده شده")
         
-        # محاسبه خودکار فقط نمازهای نخوانده مانده از ردیاب روزانه
-        q_tracker = get_qaza_from_tracker()
-        total_qaza_tracker = sum(q_tracker.values())
+        ws_qaza = sh.get_worksheet(2)
+        df_personal = load_data_from_google(2)
         
-        if total_qaza_tracker > 0:
-            st.warning(f"🚨 **خلاصه بدهی‌های جدید (نمازهای «نخوانده» در ردیاب روزانه - مجموع: {total_qaza_tracker} وعده):**")
+        # محاسبه مجموع خوانده‌شده‌ها
+        sobh_p = pd.to_numeric(df_personal.iloc[6:, 1], errors='coerce').sum()
+        zohr_p = pd.to_numeric(df_personal.iloc[6:, 2], errors='coerce').sum()
+        asr_p = pd.to_numeric(df_personal.iloc[6:, 3], errors='coerce').sum()
+        maghrib_p = pd.to_numeric(df_personal.iloc[6:, 4], errors='coerce').sum()
+        isha_p = pd.to_numeric(df_personal.iloc[6:, 5], errors='coerce').sum()
+        
+        # محاسبه نخوانده‌های ردیاب
+        q_tracker = get_qaza_from_tracker()
+        
+        # محاسبه بدهی‌های صافی (نخوانده‌ها منفی خوانده‌شده‌ها)
+        sobh_rem = max(0, int(q_tracker["sobh"] - sobh_p))
+        zohr_rem = max(0, int(q_tracker["zohr"] - zohr_p))
+        asr_rem = max(0, int(q_tracker["asr"] - asr_p))
+        maghrib_rem = max(0, int(q_tracker["maghrib"] - maghrib_p))
+        isha_rem = max(0, int(q_tracker["isha"] - isha_p))
+        
+        total_rem = sobh_rem + zohr_rem + asr_rem + maghrib_rem + isha_rem
+        
+        if total_rem > 0 or sum(q_tracker.values()) > 0:
+            st.warning(f"🚨 **خلاصه بدهی‌های باقیمانده (نمازهای «نخوانده» کسرشده با قضاهای اداشده - صافی مانده: {total_rem} وعده):**")
             col_q1, col_q2, col_q3, col_q4, col_q5 = st.columns(5)
-            col_q1.metric("🌅 صبح", f"{q_tracker['sobh']} وعده")
-            col_q2.metric("☀️ ظهر", f"{q_tracker['zohr']} وعده")
-            col_q3.metric("🌤 عصر", f"{q_tracker['asr']} وعده")
-            col_q4.metric("🌇 مغرب", f"{q_tracker['maghrib']} وعده")
-            col_q5.metric("🌃 عشا", f"{q_tracker['isha']} وعده")
-            st.caption("💡 هر زمان این نمازهای نخوانده را بجا آوردید، فرم زیر را پر کنید تا آمار خوانده‌شده‌های شما ثبت گردد.")
+            col_q1.metric("🌅 صبح", f"{sobh_rem} وعده", delta=f"-{int(sobh_p)} اداشده" if sobh_p > 0 else None)
+            col_q2.metric("☀️ ظهر", f"{zohr_rem} وعده", delta=f"-{int(zohr_p)} اداشده" if zohr_p > 0 else None)
+            col_q3.metric("🌤 عصر", f"{asr_rem} وعده", delta=f"-{int(asr_p)} اداشده" if asr_p > 0 else None)
+            col_q4.metric("🌇 مغرب", f"{maghrib_rem} وعده", delta=f"-{int(maghrib_p)} اداشده" if maghrib_p > 0 else None)
+            col_q5.metric("🌃 عشا", f"{isha_rem} وعده", delta=f"-{int(isha_p)} اداشده" if isha_p > 0 else None)
+            st.caption("💡 هر زمان این نمازهای نخوانده را بجا آوردید، فرم زیر را پر کنید تا از آمار بدهی شما کسر/محاسبه شود.")
+            st.markdown("---")
+        elif sum(q_tracker.values()) == 0:
+            st.success("🎉 ماشاءالله! هیچ نماز «نخوانده‌ای» در ردیاب روزانه شما ثبت نشده است.")
             st.markdown("---")
 
         with st.form("qaza_form", clear_on_submit=True):
@@ -237,23 +260,57 @@ try:
             with c_m: maghrib = st.number_input("🌇 مغرب", min_value=0, step=1)
             with c_e: isha = st.number_input("🌃 عشا", min_value=0, step=1)
                 
-            submitted = st.form_submit_button("☁️ ثبت در سرور گوگل")
+            submitted = st.form_submit_button("☁️ ثبت / ویرایش در سرور گوگل")
             
             if submitted:
-                if tarikh == "": st.error("❌ لطفاً تاریخ را وارد کنید.")
-                elif (sobh + zohr + asr + maghrib + isha) == 0: st.warning("⚠️ شما هیچ نمازی را وارد نکرده‌اید.")
+                if tarikh.strip() == "": 
+                    st.error("❌ لطفاً تاریخ را وارد کنید.")
+                elif (sobh + zohr + asr + maghrib + isha) == 0: 
+                    st.warning("⚠️ شما هیچ عددی وارد نکرده‌اید.")
                 else:
                     try:
-                        ws = sh.get_worksheet(2)
-                        col_a = ws.col_values(1)
-                        empty_row = max(8, len(col_a) + 1)
-                        ws.update(values=[[tarikh]], range_name=f'A{empty_row}')
-                        ws.update(values=[[sobh, zohr, asr, maghrib, isha]], range_name=f'B{empty_row}:F{empty_row}')
-                        st.success(f"✅ دست مریزاد! آمار شما با موفقیت در اینترنت ذخیره شد.")
-                    except Exception as e: st.error(f"❌ خطای اتصال به گوگل: {e}")
+                        col_a_qaza = ws_qaza.col_values(1)
+                        matching_q_rows = [i + 1 for i, val in enumerate(col_a_qaza) if val == tarikh.strip() and i >= 7]
+                        
+                        if matching_q_rows:
+                            target_row = matching_q_rows[0]
+                            ws_qaza.update(values=[[tarikh.strip()]], range_name=f'A{target_row}')
+                            ws_qaza.update(values=[[sobh, zohr, asr, maghrib, isha]], range_name=f'B{target_row}:F{target_row}')
+                            
+                            if len(matching_q_rows) > 1:
+                                for dup_row in sorted(matching_q_rows[1:], reverse=True):
+                                    ws_qaza.delete_rows(dup_row)
+                                st.success(f"✏️ اطلاعات ثبت قضای تاریخ **{tarikh}** به‌روزرسانی شد و ردیف‌های تکراری پاک شدند!")
+                            else:
+                                st.success(f"✏️ اطلاعات ثبت قضای تاریخ **{tarikh}** با موفقیت ویرایش شد!")
+                        else:
+                            target_row = max(8, len(col_a_qaza) + 1)
+                            ws_qaza.update(values=[[tarikh.strip()]], range_name=f'A{target_row}')
+                            ws_qaza.update(values=[[sobh, zohr, asr, maghrib, isha]], range_name=f'B{target_row}:F{target_row}')
+                            st.success("✅ دست مریزاد! آمار قضای شما با موفقیت در اینترنت ذخیره شد.")
+                    except Exception as e: 
+                        st.error(f"❌ خطای اتصال به گوگل: {e}")
+
+        # بخش حذف کادارهای اشتباه در قضای شخصی
+        with st.expander("🗑️ حذف یا ویرایش یک تاریخ از لیست قضای شخصی (مدیریت اشتباهات)"):
+            col_a_qaza = ws_qaza.col_values(1)
+            existing_qaza_dates = list(set([d for i, d in enumerate(col_a_qaza) if i >= 7 and d.strip() != ""]))
+            
+            if existing_qaza_dates:
+                qaza_date_to_delete = st.selectbox("تاریخ مورد نظر برای حذف را انتخاب کنید:", sorted(existing_qaza_dates, reverse=True), key="del_qaza_select")
+                if st.button("❌ حذف کامل این تاریخ از قضای شخصی", key="del_qaza_btn"):
+                    try:
+                        rows_to_delete = [i + 1 for i, val in enumerate(col_a_qaza) if val == qaza_date_to_delete and i >= 7]
+                        for r_idx in sorted(rows_to_delete, reverse=True):
+                            ws_qaza.delete_rows(r_idx)
+                        st.success(f"✅ تمام ثبت‌های مربوط به تاریخ **{qaza_date_to_delete}** از قضای شخصی حذف شدند!")
+                        st.rerun()
+                    except Exception as e:
+                        st.error(f"❌ خطا در حذف: {e}")
+            else:
+                st.info("هنوز هیچ تاریخی در قضای شخصی ثبت نشده است.")
 
         st.markdown("### 📊 تاریخچه ثبت‌شده‌ها")
-        ws_qaza = sh.get_worksheet(2)
         qaza_data = ws_qaza.get_all_values()
         
         if len(qaza_data) > 6:
