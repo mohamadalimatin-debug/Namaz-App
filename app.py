@@ -216,7 +216,7 @@ try:
                     ws_qaza_base = sh.get_worksheet(2)
                     ws_qaza_base.update(values=[["بدهی پایه تاریخی", str(total_debt), str(total_debt), str(total_debt), str(total_debt), str(total_debt)]], range_name='A2:F2')
                     sync_summary_to_google_sheet(sh)
-                    st.success(f"🎉 با موفقیت ثبت شد! عدد **{total_debt:,} روز** به‌عنوان بدهی پایه شما ذخیره و در گوگل شیت به‌روزرسانی شد.")
+                    st.success(f"🎉 با موفقیت ثبت شد! عدد **{total_debt:,} روز** به‌عنوان بدهی پایه شما ذخیره گردید.")
                     st.rerun()
                 except Exception as e:
                     st.error(f"❌ خطای ذخیره‌سازی: {e}")
@@ -374,7 +374,6 @@ try:
                     except Exception as e: 
                         st.error(f"❌ خطای اتصال به گوگل: {e}")
 
-        # بخش حذف کادارهای اشتباه در قضای شخصی
         with st.expander("🗑️ حذف یا ویرایش یک تاریخ از لیست قضای شخصی (مدیریت اشتباهات)"):
             col_a_qaza = ws_qaza.col_values(1)
             existing_qaza_dates = list(set([d for i, d in enumerate(col_a_qaza) if i >= 7 and d.strip() != ""]))
@@ -408,41 +407,98 @@ try:
         st.subheader("🤝 ثبت و مدیریت نمازهای استیجاری")
         
         ws_estijari = sh.get_worksheet(3)
+        estijari_all = ws_estijari.get_all_values()
         
-        # ۱. کادر افزودن شخص / قرارداد جدید
-        with st.expander("➕ افزودن نام شخص / قرارداد جدید"):
-            with st.form("add_person_form", clear_on_submit=True):
-                new_person = st.text_input("نام شخص / مرحوم جدید (مثال: مرحوم علی علوی)")
-                btn_add_person = st.form_submit_button("➕ افزودن به لیست")
+        # ۱. کادر افزودن قرارداد جدید با ۱۱ پارامتر کامل
+        with st.expander("➕ تعریف قرارداد استیجاری جدید"):
+            with st.form("add_contract_form", clear_on_submit=True):
+                col_c1, col_c2 = st.columns(2)
+                with col_c1:
+                    new_name = st.text_input("نام و نام خانوادگی مرحوم / شخص قرارداد")
+                    new_date_rcv = st.text_input("تاریخ دریافت قرارداد (مثال: 1403/01/01)", placeholder="1403/01/01")
+                    new_duration = st.text_input("مدت قرارداد (مثال: 1 سال)", placeholder="1 سال")
+                with col_c2:
+                    new_commitment = st.number_input("کل تعهد قرارداد (به روز / شبانه‌روز کامل)", min_value=1, value=365, step=1)
+                    new_amount = st.text_input("مبلغ کل قرارداد (تومان - مثال: 12,000,000)", value="10,000,000")
                 
-                if btn_add_person:
-                    if new_person.strip() == "":
+                btn_add_contract = st.form_submit_button("➕ ثبت قرارداد جدید در دیتابیس")
+                
+                if btn_add_contract:
+                    if new_name.strip() == "":
                         st.error("❌ لطفاً نام شخص را وارد کنید.")
                     else:
-                        raw_col_a = ws_estijari.col_values(1)[:30]
-                        existing_names = [n.strip() for n in raw_col_a if n.strip() != ""]
+                        existing_names = [row[0].strip() for row in estijari_all[:30] if len(row) > 0 and row[0].strip() != "" and row[0].strip() != "نام شخص"]
                         
-                        if new_person.strip() in existing_names:
+                        if new_name.strip() in existing_names:
                             st.warning("⚠️ این نام قبلاً در لیست وجود دارد.")
                         else:
-                            target_r = len(existing_names) + 1
+                            target_r = len(existing_names) + 2
                             if target_r > 30: target_r = 30
-                            ws_estijari.update(values=[[new_person.strip()]], range_name=f'A{target_r}')
-                            st.success(f"✅ نام **{new_person.strip()}** با موفقیت به لیست استیجاری اضافه شد!")
+                            ws_estijari.update(values=[[new_name.strip(), new_date_rcv.strip(), new_duration.strip(), str(new_commitment), new_amount.strip()]], range_name=f'A{target_r}:E{target_r}')
+                            st.success(f"✅ قرارداد مربوط به **{new_name.strip()}** با تعهد **{new_commitment} روز** ثبت شد!")
                             st.rerun()
 
-        # ۲. خواندن لیست اسامی برای فرم ثبت
-        df_estijari = load_data_from_google(3)
-        raw_names = df_estijari.iloc[0:30, 0].tolist()
-        names_list = [str(name).strip() for name in raw_names if str(name).strip() != '' and str(name).strip() != 'None']
+        # ۲. استخراج لیست قراردادهای فعال
+        contracts = []
+        for r_idx in range(0, min(30, len(estijari_all))):
+            row = estijari_all[r_idx]
+            if len(row) > 0 and row[0].strip() != "" and row[0].strip() != "نام شخص":
+                name = row[0].strip()
+                date_rcv = row[1].strip() if len(row) > 1 else "-"
+                duration = row[2].strip() if len(row) > 2 else "-"
+                commitment = int(row[3].strip()) if len(row) > 3 and row[3].strip().isdigit() else 365
+                amount = row[4].strip() if len(row) > 4 else "0"
+                contracts.append({
+                    "name": name, "date_rcv": date_rcv, "duration": duration, 
+                    "commitment": commitment, "amount": amount
+                })
         
-        if len(names_list) == 0:
-            st.info("💡 هنوز هیچ نامی در لیست استیجاری ثبت نشده است. لطفاً از کادر بالا (افزودن نام شخص جدید) اولین نام را اضافه کنید.")
+        if not contracts:
+            st.info("💡 هنوز هیچ قراردادی ثبت نشده است. لطفاً از کادر بالا (تعریف قرارداد استیجاری جدید) اولین قرارداد را ثبت کنید.")
         else:
-            with st.form("estijari_form", clear_on_submit=True):
-                col1, col2 = st.columns(2)
-                with col1: tarikh = st.text_input("تاریخ خواندن (مثال: 1403/06/15)", placeholder="1403/06/15")
-                with col2: shakhs = st.selectbox("نام شخص (قرارداد)", names_list)
+            names_list = [c["name"] for c in contracts]
+            selected_person = st.selectbox("👤 انتخاب قرارداد جهت مشاهده کارنامه و ثبت کارکرد:", names_list)
+            
+            contract_info = next(c for c in contracts if c["name"] == selected_person)
+            
+            # محاسبه آمار اداشده از جدول کارکرد استیجاری (از ردیف ۳۵ به بعد)
+            sobh_p = zohr_p = asr_p = maghrib_p = isha_p = 0
+            if len(estijari_all) > 34:
+                for row in estijari_all[35:]:
+                    if len(row) >= 8 and row[2].strip() == selected_person:
+                        sobh_p += int(row[3].strip()) if row[3].strip().isdigit() else 0
+                        zohr_p += int(row[4].strip()) if row[4].strip().isdigit() else 0
+                        asr_p += int(row[5].strip()) if row[5].strip().isdigit() else 0
+                        maghrib_p += int(row[6].strip()) if row[6].strip().isdigit() else 0
+                        isha_p += int(row[7].strip()) if row[7].strip().isdigit() else 0
+            
+            # شرط شرعی رعایت ترتیب "دور کامل" (کمترین وعده خوانده‌شده)
+            dor_kamel_p = min(sobh_p, zohr_p, asr_p, maghrib_p, isha_p)
+            total_commitment = contract_info["commitment"]
+            dor_kamel_rem = max(0, total_commitment - dor_kamel_p)
+            
+            st.markdown("---")
+            st.markdown(f"### 📋 شناسنامه قرارداد: **{selected_person}** | 📅 دریافت: {contract_info['date_rcv']} | ⏳ مدت: {contract_info['duration']} | 💰 مبلغ: {contract_info['amount']} تومان")
+            
+            col_e1, col_e2, col_e3 = st.columns(3)
+            col_e1.metric("🎯 کل تعهد قرارداد", f"{total_commitment:,} روز")
+            col_e2.metric("🏆 دور کامل اداشده", f"{dor_kamel_p:,} روز")
+            col_e3.metric("⏳ دور کامل باقیمانده", f"{dor_kamel_rem:,} روز")
+            
+            progress_e = min(100.0, (dor_kamel_p / total_commitment) * 100)
+            st.progress(progress_e / 100, text=f"📈 پیشرفت «دور کامل» قرارداد: {progress_e:.2f}%")
+            
+            if sobh_p != dor_kamel_p or zohr_p != dor_kamel_p or asr_p != dor_kamel_p or maghrib_p != dor_kamel_p or isha_p != dor_kamel_p:
+                st.caption(f"⚠️ تفکیک وعده‌های ثبت‌شده: صبح: {sobh_p} | ظهر: {zohr_p} | عصر: {asr_p} | مغرب: {maghrib_p} | عشا: {isha_p} 👈 (فقط {dor_kamel_p} شبانه‌روز به‌صورت «دور کامل مرتب» تکمیل شده است).")
+            
+            st.markdown("---")
+            st.markdown("#### ✍️ ثبت کارکرد جدید برای این قرارداد")
+            st.caption("💡 نکته شرعی: نمازهای استیجاری باید به ترتیب دور کامل (صبح 👈 ظهر 👈 عصر 👈 مغرب 👈 عشا) ادا شوند.")
+            
+            with st.form("estijari_log_form", clear_on_submit=True):
+                col_f1, col_f2 = st.columns(2)
+                with col_f1: tarikh = st.text_input("تاریخ خواندن (مثال: 1403/06/15)", placeholder="1403/06/15")
+                with col_f2: st.text_input("قرارداد مربوط به:", value=selected_person, disabled=True)
                 
                 c_s, c_z, c_a, c_m, c_e = st.columns(5)
                 with c_s: sobh = st.number_input("🌅 صبح", min_value=0, step=1, key="e_s")
@@ -451,24 +507,23 @@ try:
                 with c_m: maghrib = st.number_input("🌇 مغرب", min_value=0, step=1, key="e_m")
                 with c_e: isha = st.number_input("🌃 عشا", min_value=0, step=1, key="e_e")
                     
-                submitted = st.form_submit_button("☁️ ثبت برای این شخص در گوگل")
+                submitted_est = st.form_submit_button("☁️ ثبت برای این شخص در گوگل")
                 
-                if submitted:
-                    if tarikh.strip() == "": 
-                        st.error("❌ لطفاً تاریخ را وارد کنید.")
-                    elif (sobh + zohr + asr + maghrib + isha) == 0: 
-                        st.warning("⚠️ حداقل یک نماز را وارد کنید.")
+                if submitted_est:
+                    if tarikh.strip() == "": st.error("❌ لطفاً تاریخ را وارد کنید.")
+                    elif (sobh + zohr + asr + maghrib + isha) == 0: st.warning("⚠️ حداقل یک نماز را وارد کنید.")
                     else:
                         try:
                             col_a_est = ws_estijari.col_values(1)
                             empty_row = max(36, len(col_a_est) + 1)
                             ws_estijari.update(values=[[tarikh.strip()]], range_name=f'A{empty_row}')
-                            ws_estijari.update(values=[[shakhs, sobh, zohr, asr, maghrib, isha]], range_name=f'C{empty_row}:H{empty_row}')
-                            st.success(f"✅ عالی! نمازها برای **{shakhs}** مستقیماً در دیتابیس ذخیره شد.")
-                        except Exception as e: 
-                            st.error(f"❌ خطای اتصال به گوگل: {e}")
+                            ws_estijari.update(values=[[selected_person, sobh, zohr, asr, maghrib, isha]], range_name=f'C{empty_row}:H{empty_row}')
+                            st.success(f"✅ کارکرد جدید برای **{selected_person}** با موفقیت در دیتابیس ثبت شد!")
+                            st.rerun()
+                        except Exception as e: st.error(f"❌ خطای اتصال به گوگل: {e}")
         
-        # ۳. حذف یا ویرایش یک رکورد از تاریخچه استیجاری
+        # ۳. بخش حذف اشتباهات تاریخچه استیجاری
+        st.markdown("---")
         with st.expander("🗑️ حذف یا ویرایش یک ثبت از تاریخچه استیجاری (مدیریت اشتباهات)"):
             col_a_est = ws_estijari.col_values(1)
             existing_est_dates = list(set([d for i, d in enumerate(col_a_est) if i >= 35 and d.strip() != ""]))
@@ -487,8 +542,7 @@ try:
             else:
                 st.info("هنوز هیچ تاریخی در بخش استیجاری ثبت نشده است.")
         
-        st.markdown("---")
-        st.markdown("### 📊 تاریخچه ثبت‌شده‌ها (استیجاری)")
+        st.markdown("### 📊 تاریخچه کامل ثبت‌های استیجاری")
         estijari_data = ws_estijari.get_all_values()
         
         if len(estijari_data) > 34:
