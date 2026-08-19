@@ -9,10 +9,8 @@ st.set_page_config(page_title="نرم‌افزار مدیریت نماز", page_
 # 2. اتصال هوشمند به سرورهای گوگل از طریق Secrets
 @st.cache_resource
 def get_google_connection():
-    # خواندن اطلاعات از Streamlit Secrets
     info = dict(st.secrets["gcp_service_account"])
     
-    # اصلاح خودکار فرمت کلید برای جلوگیری از خطای JWT
     pk = str(info["private_key"])
     if "\\n" in pk:
         pk = pk.replace("\\n", "\n")
@@ -125,7 +123,9 @@ try:
                     """, unsafe_allow_html=True)
 
     elif menu == "📅 ردیاب روزانه":
-        st.subheader("📅 ثبت وضعیت ردیاب روزانه")
+        st.subheader("📅 ثبت و ویرایش وضعیت ردیاب روزانه")
+        st.caption("💡 نکته: اگر تاریخی که وارد می‌کنید قبلاً ثبت شده باشد، اطلاعات همان تاریخ به‌روزرسانی (ویرایش) خواهد شد.")
+        
         with st.form("daily_form", clear_on_submit=True):
             tarikh = st.text_input("تاریخ امروز (مثال: 1403/06/15)", placeholder="1403/06/15")
             vaziat = ["اول وقت", "زمان واجب", "قضا شده", "نخوانده"]
@@ -136,19 +136,33 @@ try:
             with col_m: maghrib = st.selectbox("🌇 مغرب", vaziat)
             with col_e: isha = st.selectbox("🌃 عشا", vaziat)
             
-            submitted = st.form_submit_button("☁️ ثبت در سرور گوگل")
+            submitted = st.form_submit_button("☁️ ثبت / ویرایش در سرور گوگل")
             
             if submitted:
-                if tarikh == "": st.error("❌ لطفاً تاریخ را وارد کنید.")
+                if tarikh.strip() == "": 
+                    st.error("❌ لطفاً تاریخ را وارد کنید.")
                 else:
                     try:
                         ws = sh.get_worksheet(1)
-                        col_a = ws.col_values(1)
-                        empty_row = max(2, len(col_a) + 1)
-                        ws.update(values=[[tarikh]], range_name=f'A{empty_row}')
-                        ws.update(values=[[sobh, zohr, asr, maghrib, isha]], range_name=f'C{empty_row}:G{empty_row}')
-                        st.success(f"✅ اطلاعات با موفقیت در دیتابیس ابری ثبت شد!")
-                    except Exception as e: st.error(f"❌ خطای اتصال به گوگل: {e}")
+                        col_a_vals = ws.col_values(1)
+                        
+                        # بررسی اینکه آیا این تاریخ قبلاً ثبت شده یا خیر
+                        if tarikh in col_a_vals:
+                            target_row = col_a_vals.index(tarikh) + 1
+                            is_edit = True
+                        else:
+                            target_row = max(2, len(col_a_vals) + 1)
+                            is_edit = False
+                        
+                        ws.update(values=[[tarikh]], range_name=f'A{target_row}')
+                        ws.update(values=[[sobh, zohr, asr, maghrib, isha]], range_name=f'C{target_row}:G{target_row}')
+                        
+                        if is_edit:
+                            st.success(f"✏️ اطلاعات تاریخ **{tarikh}** با موفقیت ویرایش و به‌روزرسانی شد!")
+                        else:
+                            st.success(f"✅ اطلاعات تاریخ **{tarikh}** با موفقیت در دیتابیس ابری ثبت شد!")
+                    except Exception as e: 
+                        st.error(f"❌ خطای اتصال به گوگل: {e}")
         
         st.markdown("### 📊 تاریخچه ثبت‌ها")
         st.dataframe(load_data_from_google(1), use_container_width=True)
@@ -219,7 +233,7 @@ try:
                 
                 if submitted:
                     if tarikh == "": st.error("❌ لطفاً تاریخ را وارد کنید.")
-                    elif (sobh + zorbit + asr + maghrib + isha) == 0: st.warning("⚠️ حداقل یک نماز را وارد کنید.")
+                    elif (sobh + zohr + asr + maghrib + isha) == 0: st.warning("⚠️ حداقل یک نماز را وارد کنید.")
                     else:
                         try:
                             ws = sh.get_worksheet(3)
@@ -236,12 +250,8 @@ try:
         estijari_data = ws_estijari.get_all_values()
         
         if len(estijari_data) > 34:
-            # استخراج دیتا از ردیف 35 به بعد
             df_updated = pd.DataFrame(estijari_data[35:], columns=estijari_data[34])
-            
-            # حذف کردن ستون‌هایی که نام (تیتر) ندارند!
             df_updated = df_updated.loc[:, df_updated.columns != '']
-            
             st.dataframe(df_updated, use_container_width=True)
         else:
             st.info("هنوز هیچ نمازی در دفترچه پایین ثبت نشده است.")
